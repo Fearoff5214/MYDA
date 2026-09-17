@@ -84,7 +84,20 @@ right for first-run testing and wrong for everything after.
 
 The hub never listens on the public internet, and never on the plain LAN.
 
-### 5. Run
+### 5. Check before you run
+
+```powershell
+python scripts/doctor.py --hub     # on the hub
+python scripts/doctor.py           # on a laptop or any other machine
+```
+
+It reports every prerequisite with the exact command to fix it, and tells you
+things a stack trace never will — whether Smart App Control will block Piper,
+whether your VRAM suits the configured model, whether the hub is still bound
+to localhost. Anything marked `MISSING` blocks startup; warnings usually
+don't. Exits non-zero if something is blocking, so it works in a script.
+
+### 6. Run
 
 ```powershell
 # on the hub
