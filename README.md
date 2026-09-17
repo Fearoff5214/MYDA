@@ -123,6 +123,30 @@ Save the spoken reply to a file if you want to check the audio itself:
 python scripts/say.py --save reply.wav "what timers are running"
 ```
 
+### Tests
+
+These need no hub, no models and no network:
+
+```powershell
+python scripts/test_guard.py     # allowlist: path traversal, app and close lists
+python scripts/test_router.py    # Tier 1 hits, and what must NOT match
+```
+
+`test_router.py` is the one to watch. A false Tier 1 match silently does the
+wrong thing, so its "must fall through to the LLM" cases matter more than the
+hits.
+
+With the hub running, measure latency:
+
+```powershell
+python scripts/bench.py          # p50/p95 per tier, against budgets
+python scripts/bench.py --tier 1 # fast path only
+```
+
+Tier 1 budget is 500 ms p50, Tier 2 is 4 s. If Tier 1 drifts above budget the
+central premise of the design has broken and it is worth fixing before adding
+anything.
+
 ---
 
 ## Layout
@@ -175,6 +199,18 @@ async def lock_screen(ctx: Context, device: str = "") -> ToolResult:
 Set `confirm=True` for anything destructive or outward-facing — deleting
 files, sending mail or SMS. Jarvis will then read the action back and wait for
 a spoken yes.
+
+Pass `available=` when a tool depends on something that may not be there:
+
+```python
+@tool(name="...", description="...", available=phone_connected)
+```
+
+The catalogue is rebuilt per turn, so a tool whose predicate is false is never
+offered to the model. This matters more than it looks: the full 34-tool
+catalogue is ~2,900 tokens on every Tier 2 call, versus ~930 with nothing
+connected. On a 14B model that difference shows up in both latency and how
+often it picks the right tool.
 
 ---
 

@@ -102,9 +102,7 @@ class Agent:
         # ("remind me at six", "what's on tomorrow") needs this injected.
         now = datetime.now()
         system = (
-            f"{SYSTEM_PROMPT}
-
-"
+            f"{SYSTEM_PROMPT}\n\n"
             f"The current local date and time is {now.strftime('%A %d %B %Y, %H:%M')}."
         )
         messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
