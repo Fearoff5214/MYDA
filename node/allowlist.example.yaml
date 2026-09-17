@@ -1,0 +1,60 @@
+# Per-machine allowlist. Copy to node/allowlist.yaml and edit for this machine.
+#
+# This file is the security boundary for everything voice can do to this PC.
+# It is an allowlist on purpose: anything not named here is refused, so a
+# misheard command or a confused model cannot reach arbitrary software.
+
+# Spoken names for this machine. The hub matches these fuzzily, so
+# "open chrome on the bedroom laptop" lands here.
+aliases:
+  - "bedroom laptop"
+  - "the small one"
+
+# Applications voice may launch. The key is what you say; the value is the
+# executable, a shell: path for Store apps, or a URL.
+apps:
+  chrome: "C:/Program Files/Google/Chrome/Application/chrome.exe"
+  firefox: "C:/Program Files/Mozilla Firefox/firefox.exe"
+  vscode: "C:/Users/param/AppData/Local/Programs/Microsoft VS Code/Code.exe"
+  explorer: "explorer.exe"
+  notepad: "notepad.exe"
+  calculator: "calc.exe"
+  terminal: "wt.exe"
+  task manager: "taskmgr.exe"
+  # Microsoft Store apps: find the id with
+  #   Get-StartApps | Where-Object { $_.Name -like "*Spotify*" }
+  spotify: "shell:appsFolder/SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify"
+
+# Processes voice may close. Deliberately narrower than the launch list --
+# being able to start Task Manager is harmless, killing things is not.
+closable:
+  - chrome
+  - firefox
+  - notepad
+  - spotify
+
+paths:
+  # Directories that may be listed and read.
+  readable:
+    - "C:/Users/param/Downloads"
+    - "C:/Users/param/Documents"
+    - "C:/Users/param/Desktop"
+    - "C:/Users/param/Pictures"
+    - "D:/"
+  # Directories that may be written, moved within, or deleted from.
+  # Keep this tight. Never include a whole drive or a system directory.
+  writable:
+    - "C:/Users/param/Downloads"
+    - "C:/Users/param/Documents/jarvis-scratch"
+
+limits:
+  max_list_entries: 60          # a spoken listing longer than this is useless
+  max_read_chars: 4000
+  max_delete_batch: 10
+
+# Arbitrary shell execution. Leave this off. Turning it on gives voice
+# unrestricted control of this machine, which defeats every allowlist above.
+shell:
+  enabled: false
+  # If you do enable it, only these exact commands are permitted.
+  allowed: []

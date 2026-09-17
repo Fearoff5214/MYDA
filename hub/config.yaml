@@ -1,0 +1,46 @@
+# Jarvis hub configuration. Lives on the desktop.
+# Secrets (tokens, API keys) go in hub/secrets.yaml which is gitignored.
+
+server:
+  # Bind to the Tailscale interface only. 0.0.0.0 is deliberately NOT the default.
+  # Set to your desktop's tailnet IP, e.g. 100.x.y.z. "127.0.0.1" for local-only dev.
+  host: "127.0.0.1"
+  port: 8080
+
+stt:
+  model: "large-v3-turbo"   # downgrade to "distil-large-v3" or "small" if VRAM is tight
+  device: "cuda"            # "cpu" works but is ~10x slower
+  compute_type: "float16"   # "int8_float16" saves ~40% VRAM at a small accuracy cost
+  language: "en"
+  vad_filter: true          # faster-whisper's bundled Silero VAD; no torch needed
+  beam_size: 1              # greedy. Bigger beams cost latency for little gain on short commands.
+
+llm:
+  base_url: "http://127.0.0.1:11434"
+  model: "qwen3:14b"        # bump to qwen3:32b if the desktop has 24GB+ VRAM
+  temperature: 0.3          # low: we want reliable tool calls, not creativity
+  num_ctx: 8192
+  max_tool_rounds: 5        # hard stop so a confused model can't loop forever
+  keep_alive: "60m"         # keep weights resident; first-token latency matters more than VRAM here
+
+tts:
+  voice: "en_GB-alan-medium"
+  speed: 1.0
+  # Piper voices download to models/piper/ on first run.
+
+router:
+  # Tier 1 fast path. Below this fuzzy-match score we fall through to the LLM.
+  threshold: 0.82
+
+audio:
+  input_rate: 16000         # what clients send; Whisper's native rate
+  frame_ms: 30
+
+security:
+  require_confirmation: true
+  allow_shell: false        # see plan; enabling this is a deliberate choice
+  audit_log: "logs/audit.jsonl"
+
+wake:
+  model: "hey_jarvis"       # openWakeWord pretrained
+  threshold: 0.6

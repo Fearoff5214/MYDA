@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.env
+logs/*.log
+logs/*.jsonl
+hub/db.sqlite*
+hub/secrets.yaml
+node/token
+client/token
+models/
+infra/homeassistant/
+infra/searxng/
+*.onnx
+*.onnx.json
