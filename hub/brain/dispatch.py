@@ -21,8 +21,6 @@ from .registry import invoke
 
 log = logging.getLogger("jarvis.dispatch")
 
-MAX_HISTORY_TURNS = 6
-
 
 class Brain:
     def __init__(self, cfg: dict[str, Any], audit_path: Path) -> None:
@@ -58,6 +56,7 @@ class Brain:
                 if answer is True:
                     ctx.extra["confirmed"] = True
                     result = await invoke(pending.tool, pending.args, ctx)
+                    session.remember(transcript, result.speech)
                     self._audit(device=ctx.device, transcript=transcript, tier="confirm",
                                 tool=pending.tool, args=pending.args, ok=result.ok,
                                 ms=round((time.perf_counter() - started) * 1000))
@@ -73,6 +72,9 @@ class Brain:
         hit = router.match(transcript, self.threshold)
         if hit is not None:
             result = await invoke(hit.tool, hit.args, ctx)
+            # Tier 1 turns go into history too, or a follow-up that does reach
+            # the LLM ("close it") has no idea what just happened.
+            session.remember(transcript, result.speech)
             ms = round((time.perf_counter() - started) * 1000)
             self._audit(device=ctx.device, transcript=transcript, tier="tier1",
                         tool=hit.tool, args=hit.args, ok=result.ok, ms=ms)

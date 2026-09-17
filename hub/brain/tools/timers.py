@@ -54,7 +54,9 @@ async def set_timer(ctx: Context, seconds: int, label: str = "") -> ToolResult:
         return ToolResult.fail("I can only set timers up to a day.")
 
     name = label.strip()
-    done = f"Your {name} timer is up." if name else f"Your {spoken_duration(seconds)} timer is up."
+    # Not "your five seconds timer is up" -- spoken_duration is plural, which
+    # reads wrong in front of "timer". Unlabelled timers just say they are up.
+    done = f"Your {name} timer is up." if name else "Your timer is up."
     job_id = ctx.scheduler.after(seconds, ctx.device, done, prefix="timer")
 
     said = f"{name} timer set for {spoken_duration(seconds)}." if name \

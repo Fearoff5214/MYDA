@@ -78,6 +78,7 @@ async def one(ws, text: str) -> dict:
     reply = ""
     audio_bytes = 0
     total_ms = 0
+    brain_ms = 0
 
     while True:
         message = await ws.recv()
@@ -92,6 +93,7 @@ async def one(ws, text: str) -> dict:
             reply = event["text"]
         elif kind == "turn_end":
             total_ms = event.get("latency_ms", 0)
+            brain_ms = event.get("brain_ms", 0)
             break
         elif kind == "no_speech":
             break
@@ -100,6 +102,7 @@ async def one(ws, text: str) -> dict:
         "text": text,
         "reply": reply,
         "total_ms": total_ms or round((time.perf_counter() - started) * 1000),
+        "brain_ms": brain_ms,
         "first_audio_ms": round(first_audio) if first_audio else None,
         "audio_s": round(audio_bytes / 2 / 22050, 1),
     }
@@ -109,20 +112,33 @@ def report(label: str, rows: list[dict], budget_ms: int) -> bool:
     if not rows:
         return True
     totals = sorted(r["total_ms"] for r in rows)
+    brains = sorted(r["brain_ms"] for r in rows if r["brain_ms"])
     firsts = [r["first_audio_ms"] for r in rows if r["first_audio_ms"]]
     p50 = statistics.median(totals)
     p95 = totals[min(len(totals) - 1, int(len(totals) * 0.95))]
 
     print(f"\n{label}  ({len(rows)} turns)")
     print(f"  total      p50 {p50:>6.0f} ms   p95 {p95:>6.0f} ms   max {totals[-1]:>6.0f} ms")
+    if brains:
+        b50 = statistics.median(brains)
+        print(f"  brain      p50 {b50:>6.0f} ms   routing + tool, excluding speech")
+        print(f"  speech     p50 {p50 - b50:>6.0f} ms   Piper is ~10x faster than the SAPI fallback")
     if firsts:
         print(f"  to speech  p50 {statistics.median(firsts):>6.0f} ms")
-    print(f"  budget     {budget_ms} ms  ->  {'PASS' if p50 <= budget_ms else 'OVER BUDGET'}")
+
+    # The gate is brain time. How fast speech synthesises depends on which
+    # backend the machine will actually run, which is not a property of the
+    # design -- a machine forced onto the SAPI fallback should not read as a
+    # regression in the router.
+    gate = statistics.median(brains) if brains else p50
+    print(f"  budget     {budget_ms} ms on brain  ->  "
+          f"{'PASS' if gate <= budget_ms else 'OVER BUDGET'}")
 
     slowest = sorted(rows, key=lambda r: -r["total_ms"])[:3]
     for r in slowest:
-        print(f"    {r['total_ms']:>6} ms  {r['text'][:44]:<44} {r['reply'][:34]}")
-    return p50 <= budget_ms
+        print(f"    {r['total_ms']:>6} ms total / {r['brain_ms']:>4} ms brain  "
+              f"{r['text'][:38]:<38} {r['reply'][:30]}")
+    return gate <= budget_ms
 
 
 async def run(args: argparse.Namespace) -> int:

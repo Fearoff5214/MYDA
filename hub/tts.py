@@ -21,6 +21,8 @@ from typing import Any, AsyncIterator, Iterator
 
 import httpx
 
+from . import sapi
+
 log = logging.getLogger("jarvis.tts")
 
 VOICE_REPO = "https://huggingface.co/rhasspy/piper-voices/resolve/main"
@@ -59,6 +61,27 @@ class Synthesizer:
         self.sample_rate = 22050
         self._lock = asyncio.Lock()
 
+        self.backend = "piper"
+        self.allow_sapi_fallback = cfg.get("allow_sapi_fallback", True)
+        self.sapi_voice = cfg.get("sapi_voice", "")
+        self.sapi_rate = int(cfg.get("sapi_rate", 1))
+
+    def _init_sapi(self) -> bool:
+        """Switch this synthesizer to Windows speech. Returns False if absent."""
+        if not sapi.available():
+            log.error("Windows speech is unavailable too; there is no working voice")
+            return False
+        self.backend = "sapi"
+        self.sample_rate = sapi.SAMPLE_RATE
+        names = sapi.voices()
+        if self.sapi_voice and self.sapi_voice not in names:
+            log.warning("SAPI voice %r not installed; using the default. Available: %s",
+                        self.sapi_voice, ", ".join(names))
+            self.sapi_voice = ""
+        log.warning("using Windows speech (%s). Quality is well below Piper.",
+                    self.sapi_voice or "default voice")
+        return True
+
     async def ensure_voice(self) -> tuple[Path, Path]:
         """Download the voice on first run. ~60MB, once."""
         MODELS_DIR.mkdir(parents=True, exist_ok=True)
@@ -78,8 +101,18 @@ class Synthesizer:
         return onnx, conf
 
     def load(self, onnx: Path, conf: Path) -> None:
-        """Blocking. Call once at startup."""
-        from piper import PiperVoice
+        """Blocking. Call once at startup.
+
+        A failure here (missing wheel, blocked DLL at import time) is not
+        fatal: we fall back to Windows speech so the hub still talks.
+        """
+        try:
+            from piper import PiperVoice
+        except Exception as exc:  # noqa: BLE001
+            log.error("piper unavailable (%s)", exc)
+            if self.allow_sapi_fallback and self._init_sapi():
+                return
+            raise
 
         self._voice = PiperVoice.load(str(onnx), config_path=str(conf))
         self.sample_rate = json.loads(conf.read_text(encoding="utf-8"))["audio"]["sample_rate"]
@@ -87,15 +120,38 @@ class Synthesizer:
 
     def _synth_sync(self, text: str) -> bytes:
         """Return raw int16 mono PCM for one sentence."""
+        if self.backend == "sapi":
+            return sapi.synthesize(text, voice=self.sapi_voice, rate=self.sapi_rate)
+
         voice = self._voice
         if voice is None:
             raise RuntimeError("Synthesizer.load() was never called")
 
-        # piper-tts >= 1.3
+        try:
+            return self._synth_piper(voice, text)
+        except (ImportError, OSError) as exc:
+            # Piper's espeak bridge is an unsigned native DLL. Under Smart App
+            # Control or a WDAC policy, Windows blocks it at first synthesis --
+            # not at load -- so this is the only place we can discover it.
+            if not self.allow_sapi_fallback:
+                raise
+            log.error("Piper cannot synthesise (%s); falling back to Windows speech "
+                      "for the rest of this session", exc)
+            if not self._init_sapi():
+                raise
+            return sapi.synthesize(text, voice=self.sapi_voice, rate=self.sapi_rate)
+
+    def _synth_piper(self, voice: Any, text: str) -> bytes:
+        # piper-tts >= 1.3 yields AudioChunk objects. `bytes(chunk)` would
+        # raise on those, so never fall back to it when the attribute exists
+        # but is simply an empty chunk.
         if hasattr(voice, "synthesize") and not hasattr(voice, "synthesize_stream_raw"):
             chunks: list[bytes] = []
             for chunk in voice.synthesize(text):
-                chunks.append(getattr(chunk, "audio_int16_bytes", None) or bytes(chunk))
+                pcm = getattr(chunk, "audio_int16_bytes", None)
+                if pcm is None:
+                    pcm = bytes(chunk)
+                chunks.append(pcm)
             return b"".join(chunks)
 
         # piper-tts < 1.3

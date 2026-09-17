@@ -24,7 +24,9 @@ class Session:
     device: str
     history: list[dict[str, Any]] = field(default_factory=list)
     pending: PendingAction | None = None
-    speaking: asyncio.Task[Any] | None = None
+    # The whole in-flight turn -- transcribe, think, speak -- as one
+    # cancellable task. Barge-in means cancelling this.
+    turn: asyncio.Task[Any] | None = None
 
     def remember(self, user_text: str, reply: str) -> None:
         """Keep a short rolling window. Long history costs latency and, on a
@@ -39,19 +41,24 @@ class Session:
         self.history.clear()
         self.pending = None
 
-    async def stop_speaking(self) -> None:
-        """Barge-in: cancel any in-flight TTS for this device."""
-        task = self.speaking
-        if task is None or task.done():
+    async def cancel_turn(self) -> None:
+        """Barge-in: abandon the in-flight turn for this device."""
+        task = self.turn
+        self.turn = None
+        if task is None:
+            return
+        if task.done():
+            # Consume any exception, or asyncio logs "never retrieved" noise.
+            if not task.cancelled() and task.exception() is not None:
+                log.warning("turn on %s had already failed: %s",
+                            self.device, task.exception())
             return
         task.cancel()
-        try:
-            await task
-        except (asyncio.CancelledError, Exception):  # noqa: BLE001
-            pass
-        finally:
-            self.speaking = None
-        log.info("barge-in: stopped speaking on %s", self.device)
+        # gather(return_exceptions=True) collects the child's CancelledError as
+        # a result instead of raising it here. A bare `except CancelledError`
+        # would also swallow our *own* cancellation during shutdown.
+        await asyncio.gather(task, return_exceptions=True)
+        log.info("barge-in: abandoned turn on %s", self.device)
 
 
 class SessionStore:

@@ -41,6 +41,14 @@ def _tap(vk: int, times: int = 1) -> None:
         time.sleep(0.005)
 
 
+def _step(args: dict) -> int:
+    """How far to move the volume. A model may send nonsense here."""
+    try:
+        return max(2, min(100, int(args.get("amount", 10))))
+    except (TypeError, ValueError):
+        return 10
+
+
 def volume(allow: dict, args: dict) -> dict:
     """direction: up | down | mute, or level: 0-100."""
     level = args.get("level")
@@ -58,13 +66,11 @@ def volume(allow: dict, args: dict) -> dict:
         return {"level": level, "speech": f"Volume set to {level} percent."}
 
     if direction in ("up", "louder", "raise", "increase"):
-        amount = int(args.get("amount", 10))
-        _tap(VK["volume_up"], times=max(1, amount // STEP_PERCENT))
+        _tap(VK["volume_up"], times=max(1, _step(args) // STEP_PERCENT))
         return {"speech": "Turned it up."}
 
     if direction in ("down", "quieter", "lower", "decrease"):
-        amount = int(args.get("amount", 10))
-        _tap(VK["volume_down"], times=max(1, amount // STEP_PERCENT))
+        _tap(VK["volume_down"], times=max(1, _step(args) // STEP_PERCENT))
         return {"speech": "Turned it down."}
 
     if direction in ("mute", "unmute", "toggle"):

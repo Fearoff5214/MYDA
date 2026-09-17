@@ -40,7 +40,9 @@ class NodeRegistry:
 
     def __init__(self) -> None:
         self._conns: dict[str, NodeConn] = {}
-        self._waiting: dict[str, asyncio.Future[dict[str, Any]]] = {}
+        # req_id -> (device waiting on, future). The device is tracked so a
+        # disconnect only fails that machine's requests.
+        self._waiting: dict[str, tuple[str, asyncio.Future[dict[str, Any]]]] = {}
 
     # ---- connection lifecycle -------------------------------------------------
 
@@ -54,8 +56,11 @@ class NodeRegistry:
 
     def remove(self, device: str) -> None:
         self._conns.pop(device, None)
-        # Fail anything still waiting on this node rather than hanging.
-        for req_id, fut in list(self._waiting.items()):
+        # Fail anything waiting on *this* node rather than hanging. Requests
+        # to other machines must be left alone.
+        for req_id, (waiting_on, fut) in list(self._waiting.items()):
+            if waiting_on != device:
+                continue
             if not fut.done():
                 fut.set_result({"ok": False, "error": f"{device} disconnected"})
             self._waiting.pop(req_id, None)
@@ -113,7 +118,7 @@ class NodeRegistry:
         req_id = uuid.uuid4().hex[:12]
         loop = asyncio.get_running_loop()
         fut: asyncio.Future[dict[str, Any]] = loop.create_future()
-        self._waiting[req_id] = fut
+        self._waiting[req_id] = (device, fut)
 
         try:
             await conn.ws.send_json({"type": "command", "id": req_id,
@@ -133,9 +138,10 @@ class NodeRegistry:
 
     def deliver_result(self, msg: dict[str, Any]) -> None:
         """Called by the node WebSocket handler when a result arrives."""
-        fut = self._waiting.get(msg.get("id", ""))
-        if fut is None:
+        entry = self._waiting.get(msg.get("id", ""))
+        if entry is None:
             log.debug("result for unknown/expired request %s", msg.get("id"))
             return
+        _device, fut = entry
         if not fut.done():
             fut.set_result(msg)

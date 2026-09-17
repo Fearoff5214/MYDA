@@ -125,11 +125,24 @@ class Microphone:
             log.debug("input status: %s", status)
         data = bytes(indata)
         try:
-            self.loop.call_soon_threadsafe(self.frames.put_nowait, data)
+            # put_nowait runs later, inside the loop, so a QueueFull raised
+            # there cannot be caught here -- it would surface as an unhandled
+            # callback exception. Hence the explicit drop below.
+            self.loop.call_soon_threadsafe(self._offer, data)
         except RuntimeError:
-            pass  # loop closing
+            pass  # loop is closing
+
+    def _offer(self, data: bytes) -> None:
+        """Runs on the event loop. Drops the oldest frame when we fall behind."""
+        if self.frames.full():
+            try:
+                self.frames.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+        try:
+            self.frames.put_nowait(data)
         except asyncio.QueueFull:
-            pass  # we are behind; dropping the oldest audio is correct here
+            pass
 
     def start(self) -> None:
         self._stream = sd.RawInputStream(
@@ -217,6 +230,12 @@ class Client:
             ):
                 if key in variants:
                     return base
+            # Letter keys arrive as KeyCode, never as the bare string the
+            # hotkey was parsed into, so reduce them to their character --
+            # otherwise "--hotkey ctrl+alt+j" could never match.
+            char = getattr(key, "char", None)
+            if char:
+                return char.lower()
             return key
 
         def on_press(key):
@@ -263,16 +282,19 @@ class Client:
         """One iteration per utterance."""
         assert self.mic is not None
         capturing = False
+        wake_triggered = False
+        started_at = 0.0
 
         while True:
             frame = await self.mic.frames.get()
 
             if not capturing:
                 triggered = self.talking.is_set()
-                if not triggered and self.wake is not None:
-                    triggered = self.wake.feed(frame)
-                    if triggered:
-                        self.talking.set()
+                wake_triggered = False
+                if not triggered and self.wake is not None and self.wake.feed(frame):
+                    triggered = True
+                    wake_triggered = True
+                    self.talking.set()
                 if not triggered:
                     continue
 
@@ -281,22 +303,22 @@ class Client:
                 await self.ws.send(json.dumps(
                     {"type": "utterance_start", "sample_rate": SAMPLE_RATE}))
                 capturing = True
+                started_at = time.monotonic()
                 log.info("listening...")
 
             await self.ws.send(frame)
 
-            # Push-to-talk ends on key release. Wake-word mode ends after a
-            # fixed window in Phase 1; Phase 3 replaces this with VAD.
-            if self.wake is not None and not self.args.hold_to_talk:
-                if not hasattr(self, "_wake_started"):
-                    self._wake_started = time.monotonic()
-                if time.monotonic() - self._wake_started > self.args.wake_window:
-                    del self._wake_started
-                    self.talking.clear()
+            # A hotkey utterance ends when the key is released. A wake-word one
+            # has no release to wait for, so it closes after a fixed window --
+            # without this it would stream forever and never be transcribed.
+            # Phase 3 replaces the window with VAD endpointing.
+            if wake_triggered and time.monotonic() - started_at > self.args.wake_window:
+                self.talking.clear()
 
             if not self.talking.is_set():
                 await self.ws.send(json.dumps({"type": "utterance_end"}))
                 capturing = False
+                wake_triggered = False
                 self.mic.drain()
                 log.info("thinking...")
 
@@ -348,7 +370,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--device", default=os.environ.get("JARVIS_DEVICE", "desktop"))
     p.add_argument("--token", default=None)
     p.add_argument("--hotkey", default="ctrl+alt+space")
-    p.add_argument("--hold-to-talk", action="store_true", default=True)
+    # How an utterance ends is decided per turn (key release for the hotkey,
+    # --wake-window for the wake word), so there is no flag for it.
     p.add_argument("--wake", action="store_true", help="enable the wake word")
     p.add_argument("--wake-model", default="hey_jarvis")
     p.add_argument("--wake-threshold", type=float, default=0.6)

@@ -28,6 +28,19 @@ tts:
   speed: 1.0
   # Piper voices download to models/piper/ on first run.
 
+  # Piper ships an unsigned native DLL (espeakbridge). A machine with Smart App
+  # Control or a WDAC user-mode policy enforced will block it, and the failure
+  # only appears on the first synthesis, not at load. When that happens we fall
+  # back to Windows' own System.Speech, which is signed, offline, and built in.
+  # It sounds clearly worse and runs at roughly 1.3x realtime versus Piper's
+  # ~20x, so it is a safety net rather than a choice.
+  #   Check with: Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy' `
+  #                 -Name VerifiedAndReputablePolicyState    # 0 = off, 1 = enforced
+  # Set false to make a blocked Piper a hard startup error instead.
+  allow_sapi_fallback: true
+  sapi_voice: ""    # e.g. "Microsoft Zira Desktop"; empty = system default
+  sapi_rate: 1      # SAPI's own -10..10 scale, not a multiplier
+
 router:
   # Tier 1 fast path. Below this fuzzy-match score we fall through to the LLM.
   threshold: 0.82

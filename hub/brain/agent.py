@@ -56,7 +56,17 @@ class Agent:
         except Exception as exc:  # noqa: BLE001
             log.error("ollama unreachable at %s: %s", self.cfg["base_url"], exc)
             return False
-        names = {m["name"] for m in resp.json().get("models", [])}
+
+        # Parsing stays inside a guard too: Ollama has used both "name" and
+        # "model" keys across versions, and a KeyError here would abort hub
+        # startup rather than just degrading Tier 2.
+        try:
+            models = resp.json().get("models", [])
+            names = {m.get("name") or m.get("model", "") for m in models}
+        except Exception as exc:  # noqa: BLE001
+            log.error("could not read Ollama's model list: %s", exc)
+            return False
+
         # Ollama reports "qwen3:14b"; accept a bare name matching any tag too.
         if self.model in names or any(n.split(":")[0] == self.model.split(":")[0] for n in names):
             return True
@@ -125,6 +135,7 @@ class Agent:
                 return AgentReply(speech or "Sorry, I didn't catch that.", tools_used=used)
 
             messages.append(message)
+            results: list[ToolResult] = []
 
             for call in calls:
                 fn = call.get("function", {})
@@ -147,6 +158,7 @@ class Agent:
                     )
 
                 result = await invoke(name, args, ctx)
+                results.append(result)
                 used.append(name)
                 log.info("tool %s -> ok=%s %r", name, result.ok, result.speech[:80])
                 messages.append({
@@ -158,9 +170,11 @@ class Agent:
 
             # A single successful action needs no second LLM round -- the tool
             # already produced a natural spoken confirmation. This saves ~1.5s
-            # on the overwhelmingly common one-tool case.
-            if len(calls) == 1 and result.ok and result.speech:
-                return AgentReply(result.speech, tools_used=used)
+            # on the overwhelmingly common one-tool case. Read from `results`
+            # rather than the loop variable so this cannot pick up a result
+            # from an earlier round.
+            if len(results) == 1 and results[0].ok and results[0].speech:
+                return AgentReply(results[0].speech, tools_used=used)
 
         log.warning("hit max_tool_rounds without a final answer")
         return AgentReply("I got stuck working that out.", tools_used=used)

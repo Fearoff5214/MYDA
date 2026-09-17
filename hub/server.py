@@ -207,29 +207,61 @@ def _make_context(device: str) -> Context:
     )
 
 
-async def _handle_turn(ws: WebSocket, device: str, transcript: str, t_start: float) -> None:
+async def _run_turn(ws: WebSocket, device: str, t_start: float, *,
+                    audio: bytes | None = None, text: str | None = None) -> None:
+    """One whole turn: transcribe, think, speak.
+
+    This runs as its own task rather than inline in the receive loop. That is
+    what makes barge-in possible at all -- awaiting a turn inline would block
+    the loop for the several seconds it takes to think and speak, so the
+    client's next `utterance_start` would not be read until after Jarvis had
+    finished talking.
+    """
     session = app.state.sessions.get(device)
-    ctx = _make_context(device)
-    ctx.transcript = transcript
-
-    await ws.send_json({"type": "transcript", "text": transcript})
-    reply = await app.state.brain.handle(ctx, transcript, session)
-
-    # Speaking is its own task so the next utterance can cancel it (barge-in).
-    session.speaking = asyncio.create_task(
-        app.state.voice.send_speech(device, reply)
-    )
     try:
-        await session.speaking
-    except asyncio.CancelledError:
-        log.info("speech cancelled on %s", device)
-    finally:
-        session.speaking = None
+        transcript = text
+        if transcript is None:
+            samples = app.state.stt.pcm16_to_float32(audio or b"")
+            transcript = await app.state.stt.transcribe(samples)
+        if not transcript:
+            if ws.client_state is WebSocketState.CONNECTED:
+                await ws.send_json({"type": "no_speech"})
+            return
 
-    ms = round((time.perf_counter() - t_start) * 1000)
-    log.info("turn complete on %s in %dms", device, ms)
-    if ws.client_state is WebSocketState.CONNECTED:
-        await ws.send_json({"type": "turn_end", "latency_ms": ms})
+        ctx = _make_context(device)
+        ctx.transcript = transcript
+        await ws.send_json({"type": "transcript", "text": transcript})
+
+        # Timed separately from the total. Speech synthesis can dominate --
+        # the SAPI fallback is ~10x slower than Piper -- and lumping the two
+        # together makes the router look slow when it is not.
+        t_brain = time.perf_counter()
+        reply = await app.state.brain.handle(ctx, transcript, session)
+        brain_ms = round((time.perf_counter() - t_brain) * 1000)
+
+        await app.state.voice.send_speech(device, reply)
+
+        ms = round((time.perf_counter() - t_start) * 1000)
+        log.info("turn complete on %s in %dms (brain %dms, speech %dms)",
+                 device, ms, brain_ms, ms - brain_ms)
+        if ws.client_state is WebSocketState.CONNECTED:
+            await ws.send_json({"type": "turn_end", "latency_ms": ms,
+                                "brain_ms": brain_ms})
+
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        # A failed turn must not take the connection down with it.
+        log.exception("turn failed on %s", device)
+        if ws.client_state is WebSocketState.CONNECTED:
+            try:
+                await ws.send_json({"type": "error", "message": "Something went wrong."})
+            except Exception:  # noqa: BLE001
+                pass
+
+
+def _start_turn(session: Any, ws: WebSocket, device: str, t_start: float, **kw: Any) -> None:
+    session.turn = asyncio.create_task(_run_turn(ws, device, t_start, **kw))
 
 
 @app.websocket("/ws/voice")
@@ -279,7 +311,7 @@ async def voice_endpoint(
             kind = event.get("type")
 
             if kind == "utterance_start":
-                await session.stop_speaking()      # barge-in
+                await session.cancel_turn()        # barge-in
                 buf.clear()
                 capturing = True
                 truncated = False
@@ -294,23 +326,20 @@ async def voice_endpoint(
                                         "note": "too short"})
                     buf.clear()
                     continue
-                audio = app.state.stt.pcm16_to_float32(bytes(buf))
+                audio = bytes(buf)
                 buf.clear()
-                transcript = await app.state.stt.transcribe(audio)
-                if not transcript:
-                    await ws.send_json({"type": "no_speech"})
-                    continue
-                await _handle_turn(ws, device, transcript, t_start)
+                await session.cancel_turn()        # one turn at a time
+                _start_turn(session, ws, device, t_start, audio=audio)
 
             elif kind == "text":
                 # Typed input. Lets the entire brain be tested without a mic.
                 text = (event.get("text") or "").strip()
                 if text:
-                    await session.stop_speaking()
-                    await _handle_turn(ws, device, text, time.perf_counter())
+                    await session.cancel_turn()
+                    _start_turn(session, ws, device, time.perf_counter(), text=text)
 
             elif kind == "cancel":
-                await session.stop_speaking()
+                await session.cancel_turn()
 
             elif kind == "reset":
                 session.reset()
@@ -325,7 +354,7 @@ async def voice_endpoint(
         log.exception("voice session %s died", device)
     finally:
         app.state.voice.remove(device)
-        await session.stop_speaking()
+        await session.cancel_turn()
         log.info("voice client %s disconnected", device)
 
 

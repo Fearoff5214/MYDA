@@ -236,6 +236,35 @@ paths rather than a blocklist; arbitrary shell is disabled in config;
 destructive actions need spoken confirmation; every tool call is written to
 `logs/audit.jsonl`.
 
+## Windows Smart App Control blocks two of the models
+
+Worth knowing before you debug it yourself. Check the policy:
+
+```powershell
+Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy' `
+  -Name VerifiedAndReputablePolicyState      # 0 = off, 1 = enforced, 2 = evaluation
+```
+
+If it reports `1`, Windows refuses to load unsigned native extensions, and two
+dependencies ship exactly that:
+
+| Blocked | Symptom | Consequence |
+|---|---|---|
+| `piper/espeakbridge.pyd` | `ImportError: DLL load failed ... Application Control policy` on the **first synthesis**, not at load | Falls back to Windows System.Speech automatically |
+| `sklearn/utils/_isfinite.pyd` | `import openwakeword` fails | No wake word; push-to-talk is unaffected |
+
+The TTS fallback is automatic and the hub logs it loudly. It is genuinely
+worse — roughly 1.3x realtime against Piper's ~20x, which on this machine
+turned a 1 ms routing decision into a 570 ms spoken reply. Every millisecond
+of that is synthesis, not the router.
+
+Smart App Control **cannot be re-enabled without resetting Windows**, so
+turning it off is your call, not a step in this README. If the desktop hub
+does not have it enforced, Piper and the wake word both work with no changes.
+
+Confirmed in the Windows event log under
+`Microsoft-Windows-CodeIntegrity/Operational`, event IDs 3033/3077.
+
 ## Known limits
 
 - **Alexa and Google Home devices are cloud-locked** and cannot be controlled

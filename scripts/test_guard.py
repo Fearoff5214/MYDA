@@ -15,6 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from node.actions.guard import Refused, check_closable, check_path, resolve_app
+from node.actions.media import _step
 
 ALLOW = {
     "apps": {"chrome": "C:/x/chrome.exe", "spotify": "shell:app", "notepad": "notepad.exe"},
@@ -52,6 +53,11 @@ APP_CASES = [
 CLOSE_CASES = [("chrome", "ALLOW"), ("notepad", "ALLOW"),
                ("spotify", "REFUSE"), ("explorer", "REFUSE")]
 
+# A model can put anything in `amount`; an unhandled int() would surface to
+# the user as "That didn't work: ValueError".
+STEP_CASES = [({}, 10), ({"amount": 20}, 20), ({"amount": "loads"}, 10),
+              ({"amount": None}, 10), ({"amount": 0}, 2), ({"amount": 500}, 100)]
+
 
 def verdict(fn, *a, **kw) -> str:
     try:
@@ -86,7 +92,15 @@ def main() -> int:
         failures += not ok
         print(f"  [{'ok ' if ok else 'FAIL'}] {spoken!r:<20} {got}")
 
-    total = len(PATH_CASES) + len(APP_CASES) + len(CLOSE_CASES)
+    print("\nvolume step parsing")
+    for args, expected in STEP_CASES:
+        got = _step(args)
+        ok = got == expected
+        failures += not ok
+        print(f"  [{'ok ' if ok else 'FAIL'}] {str(args):<22} -> {got} (want {expected})")
+
+    total = (len(PATH_CASES) + len(APP_CASES) + len(CLOSE_CASES)
+             + len(STEP_CASES))
     print(f"\n{total - failures}/{total} passed")
     return 1 if failures else 0
 
