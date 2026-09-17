@@ -19,3 +19,6 @@ infra/searxng/
 wheelhouse/
 logs/
 models/
+
+# Per-machine: each PC needs its own. allowlist.example.yaml is the template.
+node/allowlist.yaml
