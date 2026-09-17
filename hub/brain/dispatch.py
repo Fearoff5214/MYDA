@@ -17,7 +17,7 @@ from . import confirm, router
 from . import rules  # noqa: F401 -- import populates router.RULES
 from .agent import Agent, AgentReply
 from .context import Context
-from .registry import invoke
+from .registry import get, invoke
 
 log = logging.getLogger("jarvis.dispatch")
 
@@ -71,6 +71,21 @@ class Brain:
         # 2. Tier 1 fast path.
         hit = router.match(transcript, self.threshold)
         if hit is not None:
+            # confirm=True must hold on every route into a tool, not just the
+            # LLM one. A rule pointing at a destructive tool (close_app) would
+            # otherwise execute it with no spoken confirmation at all, which
+            # silently voids the guarantee.
+            spec = get(hit.tool)
+            if spec is not None and spec.confirm and not ctx.extra.get("confirmed"):
+                question = confirm.question_for(hit.tool, hit.args)
+                session.pending = confirm.PendingAction(
+                    tool=hit.tool, args=hit.args, question=question)
+                self._audit(device=ctx.device, transcript=transcript, tier="tier1",
+                            tool=hit.tool, args=hit.args, awaiting_confirmation=True,
+                            ms=round((time.perf_counter() - started) * 1000))
+                log.info("tier1 tool %s needs confirmation", hit.tool)
+                return question
+
             result = await invoke(hit.tool, hit.args, ctx)
             # Tier 1 turns go into history too, or a follow-up that does reach
             # the LLM ("close it") has no idea what just happened.

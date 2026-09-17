@@ -44,8 +44,41 @@ def interpret(text: str) -> bool | None:
     return None
 
 
+# Spoken out loud, so the generic "close app with name notepad" phrasing reads
+# badly. Each destructive tool gets a sentence a person would actually say.
+# Missing keys fall back to the generic form rather than raising.
+_PHRASING: dict[str, str] = {
+    "close_app": "Close {name}?",
+    "delete_files": "Permanently delete {count_paths}? This can't be undone.",
+    "send_text": "Send {message} to {number}?",
+    "call_number": "Call {number}?",
+    "clear_list": "Clear the whole {list_name} list?",
+    "send_email": "Send an email to {to}, subject {subject}?",
+    "create_event": "Add {summary} to your calendar?",
+}
+
+
+def _fill(template: str, args: dict[str, Any]) -> str | None:
+    values = dict(args)
+    # Reading out twelve file paths is useless; a count is what matters.
+    for key, value in list(args.items()):
+        if isinstance(value, (list, tuple)):
+            n = len(value)
+            values[f"count_{key}"] = (
+                f"{n} files" if n != 1 else str(value[0]).rsplit("\\", 1)[-1].rsplit("/", 1)[-1]
+            )
+    try:
+        return template.format(**values)
+    except (KeyError, IndexError):
+        return None
+
+
 def question_for(tool_name: str, args: dict[str, Any]) -> str:
     """Read the action back so the user confirms what will actually happen."""
+    template = _PHRASING.get(tool_name)
+    if template and (spoken := _fill(template, args)):
+        return spoken
+
     detail = ", ".join(f"{k.replace('_', ' ')} {v}" for k, v in args.items() if v)
-    action = tool_name.replace("_", " ")
+    action = tool_name.replace("_", " ").strip()
     return f"You want me to {action}{' with ' + detail if detail else ''}. Should I go ahead?"
