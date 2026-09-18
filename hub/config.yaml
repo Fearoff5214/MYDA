@@ -17,11 +17,13 @@ stt:
 
 llm:
   base_url: "http://127.0.0.1:11434"
-  # TEMPORARY LOCAL OVERRIDE -- this laptop has an RTX 5060 with 8 GB VRAM and
-  # 16 GB RAM, where qwen3:14b (~9 GB) cannot be resident alongside Whisper.
-  # THE DESKTOP HUB SHOULD USE "qwen3:14b" -- put it back before deploying, and
-  # bump to qwen3:32b if the desktop has 24GB+ VRAM.
-  model: "qwen3:4b"         # ~2.5 GB; supports tool calling, which is the point
+  # This file is the DESKTOP hub's config and is committed, so it carries the
+  # desktop's model. Override per machine in hub/secrets.yaml (gitignored,
+  # merged over this at startup) rather than editing here -- an 8 GB laptop
+  # wants "qwen3:4b", which cannot be resident alongside Whisper at 14b:
+  #     llm:
+  #       model: "qwen3:4b"
+  model: "qwen3:14b"        # ~9 GB; bump to qwen3:32b if the desktop has 24GB+
   temperature: 0.3          # low: we want reliable tool calls, not creativity
   num_ctx: 8192
   max_tool_rounds: 5        # hard stop so a confused model can't loop forever
