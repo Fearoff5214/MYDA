@@ -1,0 +1,147 @@
+# Jarvis test instance of Home Assistant.
+#
+# There is no real hardware attached to this container, so everything below is
+# a helper or a template entity. The point is to give hub/brain/tools/home.py
+# something to control with realistic friendly names -- it matches spoken names
+# against `friendly_name`, so the names here are the interface under test.
+#
+# On a real install you would delete the helper and template blocks and let
+# your Tuya / TP-Link integrations supply the entities instead.
+#
+# NOTE ON FORMAT: template entities must be declared under the top-level
+# `template:` key. The older `light: - platform: template` style is gone from
+# current Home Assistant and fails with "Configuring the template integration
+# under the light platform key is not supported".
+
+default_config:
+
+# --- backing helpers -------------------------------------------------------
+# Template entities need somewhere to actually hold state. These are named
+# "Relay One"... deliberately: they appear in the entity list like any real
+# device, and they must not fuzzy-match the names of the entities they back,
+# or find() would resolve "bedroom lights" to the relay instead of the light.
+input_boolean:
+  relay_one:
+    name: Relay One
+  relay_two:
+    name: Relay Two
+  relay_three:
+    name: Relay Three
+  relay_four:
+    name: Relay Four
+  relay_five:
+    name: Relay Five
+  kitchen_plug:
+    name: Kitchen Plug          # a plug exposed directly, no template wrapper
+
+input_number:
+  level_one:
+    name: Level One
+    min: 0
+    max: 255
+    step: 1
+    initial: 255
+  level_two:
+    name: Level Two
+    min: 0
+    max: 255
+    step: 1
+    initial: 255
+
+# --- the entities the voice tools actually address -------------------------
+template:
+  - sensor:
+      - name: "Hallway Temperature"
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state: "19.5"
+
+  - light:
+      - name: "Bedroom Lights"
+        unique_id: bedroom_lights
+        state: "{{ is_state('input_boolean.relay_one', 'on') }}"
+        level: "{{ states('input_number.level_one') | int(0) }}"
+        turn_on:
+          - action: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.relay_one
+        turn_off:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.relay_one
+        set_level:
+          - action: input_number.set_value
+            target:
+              entity_id: input_number.level_one
+            data:
+              value: "{{ brightness }}"
+          - action: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.relay_one
+
+      - name: "Living Room Lamp"
+        unique_id: living_room_lamp
+        state: "{{ is_state('input_boolean.relay_two', 'on') }}"
+        level: "{{ states('input_number.level_two') | int(0) }}"
+        turn_on:
+          - action: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.relay_two
+        turn_off:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.relay_two
+        set_level:
+          - action: input_number.set_value
+            target:
+              entity_id: input_number.level_two
+            data:
+              value: "{{ brightness }}"
+          - action: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.relay_two
+
+  - switch:
+      - name: "Coffee Machine"
+        unique_id: coffee_machine
+        state: "{{ is_state('input_boolean.relay_three', 'on') }}"
+        turn_on:
+          - action: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.relay_three
+        turn_off:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.relay_three
+
+  - fan:
+      - name: "Living Room Fan"
+        unique_id: living_room_fan
+        state: "{{ iif(is_state('input_boolean.relay_four', 'on'), 'on', 'off') }}"
+        turn_on:
+          - action: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.relay_four
+        turn_off:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.relay_four
+
+climate:
+  - platform: generic_thermostat
+    name: Hallway Thermostat
+    heater: input_boolean.relay_five
+    target_sensor: sensor.hallway_temperature
+    min_temp: 7
+    max_temp: 30
+    target_temp: 21
+    initial_hvac_mode: heat
+
+scene:
+  - name: Movie Night
+    entities:
+      # Scene states must be strings, including numeric ones -- a bare 40 here
+      # fails validation with "should be a string for dictionary value".
+      input_boolean.kitchen_plug: "on"
+      input_boolean.relay_one: "on"
+      input_number.level_one: "40"

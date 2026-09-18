@@ -1,0 +1,18 @@
+# Read the documentation before extending the defaults:
+# https://docs.searxng.org/admin/settings/
+
+use_default_settings: true
+
+server:
+  secret_key: "CHANGE-ME - any random string, e.g. python -c \"import secrets;print(secrets.token_hex(16))\""
+  image_proxy: true
+
+search:
+  # JSON is OFF in SearXNG's defaults and it answers 403 Forbidden without it.
+  # The SEARXNG_SEARCH_FORMATS environment variable does NOT enable it -- the
+  # format list is only read from this file. hub/brain/tools/web.py needs json.
+  formats:
+    - html
+    - json
+  safe_search: 1
+  autocomplete: ""
