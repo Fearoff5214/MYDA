@@ -56,6 +56,26 @@ HITS = [
     ("skip", "media_control", {"action": "next"}),
     ("next track", "media_control", {"action": "next"}),
     ("go back", "media_control", {"action": "previous"}),
+    # smart home -- the highest-value fast path in the whole table. A light
+    # switch routed through the LLM costs 2-4s for what should feel instant.
+    ("turn off the bedroom lights", "control_device",
+     {"name": "bedroom lights", "state": "off"}),
+    ("turn on the kitchen plug", "control_device",
+     {"name": "kitchen plug", "state": "on"}),
+    ("switch off the fan", "control_device", {"name": "fan", "state": "off"}),
+    ("turn the lights off", "control_device", {"name": "lights", "state": "off"}),
+    ("hey jarvis turn on the lamp", "control_device",
+     {"name": "lamp", "state": "on"}),
+    ("toggle the fan", "control_device", {"name": "fan", "state": "toggle"}),
+    ("dim the bedroom lights to 30 percent", "set_brightness",
+     {"name": "bedroom lights", "percent": 30}),
+    ("set the lamp to fifty", "set_brightness", {"name": "lamp", "percent": 50}),
+    ("are the bedroom lights on", "device_state", {"name": "bedroom lights"}),
+    ("what lights do i have", "list_smart_devices", {}),
+
+    # these must keep their existing meaning now that turn/switch are claimed
+    ("what devices are online", "list_computers", {}),
+    ("stop the timer", "cancel_timers", {}),
 ]
 
 # These must NOT match Tier 1 -- they need the LLM.
@@ -66,10 +86,12 @@ FALLTHROUGH = [
     "what's in my downloads",
     "email mum about dinner",
     "remind me to call the landlord at six",
-    "turn off the bedroom lights",
     "how many grams in an ounce",
     "play something upbeat on spotify",
     "delete the old screenshots",
+    "turn that song up a bit",
+    "is dinner ready",
+    "what is the weather like on friday",
     "",
     "uh",
 ]

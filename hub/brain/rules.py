@@ -135,3 +135,41 @@ rule(rf"(?:next|skip)(?: (?:track|song|this))?{DEVICE_TAIL}",
      "media_control", action="next")
 rule(rf"(?:previous|last|go back)(?: (?:track|song))?{DEVICE_TAIL}",
      "media_control", action="previous")
+
+# ---------------------------------------------------------------------------
+# smart home
+#
+# These matter more than anything else here. "Turn off the lights" is the most
+# spoken command in a house, and routing it through a 14B model costs 2-4
+# seconds for what should be instant. The device name is passed through
+# verbatim -- tools/home.py fuzzy-matches it against Home Assistant's live
+# friendly names, so nothing here needs to know what devices exist.
+
+# "turn off the timer" should reach cancel_timers, not hunt for a smart plug
+# called "timer". Same for the volume rules above, which own "turn it up".
+NOT_A_TIMER = r"(?!(?:the )?timers?\b)"
+DEVICE_NAME = rf"{NOT_A_TIMER}[\w\s'-]+?"
+
+rule(rf"(?:turn|switch) (?P<state>on|off) (?:the |my )?(?P<name>{DEVICE_NAME})",
+     "control_device")
+rule(rf"(?:turn|switch) (?:the |my )?(?P<name>{DEVICE_NAME}) (?P<state>on|off)",
+     "control_device")
+rule(rf"(?:put )(?:the |my )?(?P<name>{DEVICE_NAME}) (?P<state>on|off)",
+     "control_device")
+rule(rf"toggle (?:the |my )?(?P<name>{DEVICE_NAME})",
+     "control_device", state="toggle")
+
+
+def _brightness(groups: dict[str, str]) -> dict:
+    return {"name": groups.get("name", "").strip(),
+            "percent": to_number(groups.get("count", ""), default=50)}
+
+
+rule(rf"(?:dim|set|brighten) (?:the |my )?(?P<name>{DEVICE_NAME}) to {NUM}(?: percent)?",
+     "set_brightness", transform=_brightness)
+
+rule(rf"(?:are|is) (?:the |my )?(?P<name>{DEVICE_NAME}) (?:on|off)",
+     "device_state")
+rule(r"(?:what|which) (?:smart )?(?:devices?|lights?|things?)"
+     r"(?: can (?:you|i) control| are there| do i have)?",
+     "list_smart_devices")
