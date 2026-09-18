@@ -173,3 +173,36 @@ rule(rf"(?:are|is) (?:the |my )?(?P<name>{DEVICE_NAME}) (?:on|off)",
 rule(r"(?:what|which) (?:smart )?(?:devices?|lights?|things?)"
      r"(?: can (?:you|i) control| are there| do i have)?",
      "list_smart_devices")
+
+# ---------------------------------------------------------------------------
+# notes, lists and reminders
+#
+# These are here because Tier 2 got them wrong, not merely slowly. Asked to
+# "read me my notes", qwen2.5:3b replied "Here are your recent notes:" and
+# called nothing -- promising content it then never delivered, on 4 of 5
+# attempts. A small model is unreliable at tools whose whole job is to fetch
+# something, because answering *looks* like succeeding.
+#
+# The phrasings are fixed and few, so a regex is strictly better than a model
+# here: correct every time, and ~1ms instead of 3-26s.
+
+LIST_NAME = r"(?P<list_name>[\w\s'-]+?)"
+
+rule(r"(?:read|say|tell me)(?: me)?(?: back)?(?: my| the)? notes(?: back(?: to me)?)?",
+     "read_notes")
+rule(r"(?:what|which) (?:are |were )?(?:my |the )?notes(?: again)?",
+     "read_notes")
+rule(r"(?:what'?s|what is|what have i got) (?:in |on )?(?:my |the )?notes",
+     "read_notes")
+
+rule(rf"(?:what'?s|what is) on (?:my |the )?{LIST_NAME}(?: list)?", "read_list")
+rule(rf"read (?:me )?(?:my |the )?{LIST_NAME} list", "read_list")
+rule(rf"(?:what'?s|what is) (?:left )?on (?:my |the )?{LIST_NAME} list", "read_list")
+
+rule(rf"add (?P<item>[\w\s'-]+?) to (?:my |the )?{LIST_NAME}(?: list)?",
+     "add_to_list")
+rule(rf"put (?P<item>[\w\s'-]+?) on (?:my |the )?{LIST_NAME}(?: list)?",
+     "add_to_list")
+
+rule(r"(?:what|which) reminders?(?: are set| do i have| have i got)?", "list_reminders")
+rule(r"(?:what'?s|what is) (?:my |the )?next reminder", "list_reminders")

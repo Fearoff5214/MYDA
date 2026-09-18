@@ -73,6 +73,20 @@ HITS = [
     ("are the bedroom lights on", "device_state", {"name": "bedroom lights"}),
     ("what lights do i have", "list_smart_devices", {}),
 
+    # notes / lists / reminders. Promoted here because Tier 2 got them WRONG,
+    # not merely slowly -- qwen2.5:3b answered "Here are your recent notes:"
+    # and called nothing on 4 of 5 attempts.
+    ("read me my notes", "read_notes", {}),
+    ("what are my notes", "read_notes", {}),
+    ("read my notes back to me", "read_notes", {}),
+    ("add milk to the shopping list", "add_to_list",
+     {"item": "milk", "list_name": "shopping"}),
+    ("put eggs on the shopping list", "add_to_list",
+     {"item": "eggs", "list_name": "shopping"}),
+    ("what's on the shopping list", "read_list", {"list_name": "shopping"}),
+    ("read the packing list", "read_list", {"list_name": "packing"}),
+    ("what reminders do i have", "list_reminders", {}),
+
     # these must keep their existing meaning now that turn/switch are claimed
     ("what devices are online", "list_computers", {}),
     ("stop the timer", "cancel_timers", {}),
@@ -92,6 +106,9 @@ FALLTHROUGH = [
     "turn that song up a bit",
     "is dinner ready",
     "what is the weather like on friday",
+    # needs the model to pull the note text out of the sentence
+    "make a note that the boiler needs servicing",
+    "add milk",
     "",
     "uh",
 ]
