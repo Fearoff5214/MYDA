@@ -7,7 +7,7 @@ phone, and it answers from whichever device you happen to be near.
 
 ```
   Laptop 1          Laptop 2          Android
-  wake + hotkey     wake + hotkey     wake + widget
+  wake + hotkey     wake + hotkey     widget button only
   node agent        node agent        phone actions
        └────────────── Tailscale ──────────┘
                         │
@@ -300,6 +300,43 @@ does not have it enforced, Piper and the wake word both work with no changes.
 Confirmed in the Windows event log under
 `Microsoft-Windows-CodeIntegrity/Operational`, event IDs 3033/3077.
 
+## Android, honestly
+
+The client is Termux + Termux:API speaking the same node protocol as the PCs,
+so the hub needs no Android-specific code. Its only Python dependency is
+`websockets` — pure Python, no native wheels — which is what makes this
+viable at all.
+
+**Works:** a home-screen widget button that records one utterance and speaks
+the reply, plus SMS send and read, calls, alarms, notification reading,
+battery, clipboard, and ring-to-find. The persistent socket means the hub can
+push to the phone, so a timer set on the desktop can announce there.
+
+**Does not work: the wake word.** openWakeWord needs `onnxruntime`, which has
+no prebuilt wheel for Termux/aarch64 — you would have to compile it. The
+client does not attempt it. **The phone is push-to-talk only**, and anything
+hands-free on Android would need a real native app.
+
+**Also not viable:** always-listening or background microphone. Android 14+
+restricts background mic access regardless of Termux.
+
+Setup gotchas, all of which will silently break it:
+
+| Requirement | Why |
+|---|---|
+| Termux from **F-Droid or GitHub**, never Play Store | The Play Store build is abandoned and its API bridge does not work |
+| Termux:API **companion app**, not just `pkg install termux-api` | The package is only the CLI shim; the app does the work |
+| Manual permission grants | SMS, phone, and microphone must be granted to Termux:API by hand |
+| Notification listener access | Separate toggle under Settings → Notifications |
+| Battery optimisation exemption | Otherwise Android kills the daemon within minutes of screen-off |
+| Termux:Widget | For the home-screen button; another separate app |
+
+`android/setup.sh` installs what it can and checks the API bridge is actually
+responding rather than merely installed. Everything in the table above still
+needs you on the phone.
+
+**None of this has been run on a real phone yet.**
+
 ## Known limits
 
 - **Alexa and Google Home devices are cloud-locked** and cannot be controlled
@@ -314,3 +351,6 @@ Confirmed in the Windows event log under
 - **iPhone is not supported.** iOS allows neither a wake word nor deep app
   control without jailbreaking. An Apple Shortcut posting to the hub is the
   realistic path, once the rest is proven.
+- **No wake word on Android either**, for a different reason: no onnxruntime
+  wheel for Termux. See the Android section above. Hands-free works on the
+  three PCs only.
