@@ -12,14 +12,29 @@ services:
     restart: unless-stopped
     volumes:
       - ./homeassistant:/config
-      - /etc/localtime:/etc/localtime:ro
     environment:
       - TZ=Asia/Kolkata
-    # host networking lets Home Assistant discover Tuya, TP-Link and Matter
-    # devices by broadcast. Without it, local discovery silently finds nothing.
-    # On Docker Desktop for Windows host networking is limited; if discovery
-    # fails, add devices by IP instead, or run HA on a Linux box or a Pi.
-    network_mode: host
+    # host networking is what lets Home Assistant discover Tuya, TP-Link and
+    # Matter devices by broadcast -- discovery relies on sending and receiving
+    # UDP broadcast on the LAN, which only works when the container shares the
+    # host's network stack. That is the right setting on Linux.
+    #
+    # It does NOT work on Docker Desktop for Windows. `network_mode: host` there
+    # puts the container on the network of the internal WSL2 VM, not on your
+    # LAN: HA becomes unreachable at 127.0.0.1:8123 from Windows, and broadcast
+    # discovery finds nothing anyway because the VM is behind a NAT.
+    #
+    # So on Windows we give up discovery and publish the port explicitly. The
+    # cost is real: Tuya/TP-Link devices must then be added by IP (give them
+    # DHCP reservations first, or they move and stop responding), and anything
+    # that is discovery-only -- Matter, HomeKit-bridged gear, some Chromecasts
+    # -- will not appear at all. If you care about that, run Home Assistant on
+    # a Pi or a Linux box on the LAN and point hub/secrets.yaml at its address;
+    # that is the setup this was designed for. Swap the two lines below back on
+    # a Linux host.
+    ports:
+      - "127.0.0.1:8123:8123"
+    # network_mode: host        # Linux only -- see above
 
   searxng:
     image: searxng/searxng:latest

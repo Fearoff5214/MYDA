@@ -6,7 +6,10 @@ the hub over a WebSocket, and plays back the spoken reply.
 
 Two ways to start talking:
   * push-to-talk -- hold a hotkey (default ctrl+alt+space). Always available.
-  * wake word    -- say "hey jarvis". Enabled with --wake (Phase 3).
+  * wake word    -- say "hey jarvis". Enabled with --wake. Needs openWakeWord
+                    and its ONNX models, which are fetched on first use; see
+                    client/wakeword.py. If anything about it fails the client
+                    logs it and carries on with push-to-talk.
 
 Usage:
     python -m client.listener --hub ws://100.x.y.z:8080 --device laptop-1
@@ -25,7 +28,6 @@ import threading
 import time
 from pathlib import Path
 
-import numpy as np
 import sounddevice as sd
 import websockets
 
@@ -166,32 +168,22 @@ class Microphone:
                 break
 
 
-class WakeWord:
-    """openWakeWord wrapper. Optional -- absent unless --wake is passed."""
+def load_wake_word(model: str, threshold: float, vad_threshold: float):
+    """Import and build the wake word detector.
 
-    def __init__(self, model: str, threshold: float) -> None:
-        from openwakeword.model import Model
+    Kept behind a function so a machine that cannot run it (no models, blocked
+    DLLs, missing package) fails here and nowhere else -- the caller downgrades
+    to push-to-talk. See client/wakeword.py for the Smart App Control story.
+    """
+    try:
+        from client.wakeword import WakeWord
+    except ImportError:
+        # Started as `python client/listener.py` rather than `-m client.listener`,
+        # so the repo root is not on sys.path.
+        sys.path.insert(0, str(HERE.parent))
+        from client.wakeword import WakeWord
 
-        self.threshold = threshold
-        self.model = Model(wakeword_models=[model], inference_framework="onnx")
-        self.name = model
-        self._last_fire = 0.0
-        log.info("wake word %r armed at threshold %.2f", model, threshold)
-
-    def feed(self, pcm: bytes) -> bool:
-        samples = np.frombuffer(pcm, dtype=np.int16)
-        scores = self.model.predict(samples)
-        score = max(scores.values()) if scores else 0.0
-        if score < self.threshold:
-            return False
-        # Debounce: one utterance can cross the threshold on several frames.
-        now = time.monotonic()
-        if now - self._last_fire < 2.0:
-            return False
-        self._last_fire = now
-        self.model.reset()
-        log.info("wake word fired (%.2f)", score)
-        return True
+    return WakeWord(model, threshold, vad_threshold=vad_threshold)
 
 
 class Client:
@@ -205,7 +197,7 @@ class Client:
         self.talking = asyncio.Event()      # set while capturing an utterance
         self.ws = None
         self.mic: Microphone | None = None
-        self.wake: WakeWord | None = None
+        self.wake = None                    # client.wakeword.WakeWord, or None
 
     # ---- hotkey ---------------------------------------------------------------
 
@@ -330,7 +322,11 @@ class Client:
 
         if self.args.wake:
             try:
-                self.wake = WakeWord(self.args.wake_model, self.args.wake_threshold)
+                self.wake = load_wake_word(
+                    self.args.wake_model,
+                    self.args.wake_threshold,
+                    self.args.wake_vad_threshold,
+                )
             except Exception as exc:  # noqa: BLE001
                 log.error("wake word unavailable (%s); push-to-talk still works", exc)
 
@@ -375,6 +371,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--wake", action="store_true", help="enable the wake word")
     p.add_argument("--wake-model", default="hey_jarvis")
     p.add_argument("--wake-threshold", type=float, default=0.6)
+    p.add_argument("--wake-vad-threshold", type=float, default=0.0,
+                   help="0 disables. >0 gates the wake word behind Silero VAD, "
+                        "which suppresses false positives from non-speech noise")
     p.add_argument("--wake-window", type=float, default=6.0,
                    help="seconds to record after the wake word (Phase 1; VAD in Phase 3)")
     p.add_argument("--list-devices", action="store_true")

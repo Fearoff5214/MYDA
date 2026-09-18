@@ -271,6 +271,28 @@ worse — roughly 1.3x realtime against Piper's ~20x, which on this machine
 turned a 1 ms routing decision into a 570 ms spoken reply. Every millisecond
 of that is synthesis, not the router.
 
+### The blocks are nondeterministic, which is the real problem
+
+Worse than a consistent failure: the policy decides per *file*, using a cloud
+reputation lookup, and **the same import can succeed and fail minutes apart in
+the same venv**. Observed here in one sitting:
+
+```
+import numpy.random   ->  ImportError: DLL load failed while importing mtrand:
+                          An Application Control policy has blocked this file.
+import numpy.random   ->  ok            # ~30 seconds later, nothing changed
+```
+
+`sklearn/utils/_isfinite.pyd` behaved the same way, and so did
+`websockets/speedups.pyd`. So a machine with Smart App Control enforced does
+not merely lose Piper and the wake word — **it can fail anywhere a native
+extension is loaded, at any time, including mid-session.** No amount of
+fallback code fixes that.
+
+Treat a Smart-App-Control machine as unsuitable for hosting the hub. Run the
+hub where the policy is off, and keep the enforced machine as a voice client
+and node agent (both of which survived every observed block).
+
 Smart App Control **cannot be re-enabled without resetting Windows**, so
 turning it off is your call, not a step in this README. If the desktop hub
 does not have it enforced, Piper and the wake word both work with no changes.

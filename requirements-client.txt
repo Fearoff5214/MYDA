@@ -3,6 +3,11 @@ websockets>=13.0
 numpy>=1.26
 sounddevice>=0.4.7
 openwakeword>=0.6.0
+# openWakeWord declares scikit-learn and scipy, but only its custom-verifier
+# *training* helper uses them -- and sklearn's unsigned native extensions are
+# blocked by Smart App Control on Windows 11. client/wakeword.py stubs that one
+# module out so the package imports and runs on ONNX alone. Nothing in the
+# client needs sklearn/scipy; if pip installed them, they go unused.
 onnxruntime>=1.18
 pynput>=1.7
 pyyaml>=6.0

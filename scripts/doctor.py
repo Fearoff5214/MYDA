@@ -79,7 +79,8 @@ def smart_app_control() -> None:
         return
     if out == "1":
         check("Smart App Control", WARN,
-              "ENFORCED -- blocks Piper speech and the wake word; falls back to Windows speech")
+              "ENFORCED -- blocks native extensions NONDETERMINISTICALLY. "
+              "Do not host the hub here; use this machine as a client. See README.")
     elif out in ("0", "2", ""):
         check("Smart App Control", OK, "off -- Piper and wake word can run")
 
