@@ -122,9 +122,28 @@ class HomeAssistant:
         close = difflib.get_close_matches(needle, list(by_name), n=1, cutoff=0.6)
         return by_name[close[0]] if close else None
 
+    async def state(self, entity_id: str) -> str | None:
+        """Live state of one entity, bypassing the cache.
+
+        The entity cache exists so the tool catalogue and name matching do not
+        re-fetch hundreds of entities per turn, but a *state* question must
+        never be answered from it -- "are the lights on?" seconds after turning
+        them on would otherwise say off.
+        """
+        try:
+            resp = await self._http().get(f"/api/states/{entity_id}")
+            resp.raise_for_status()
+            return resp.json().get("state")
+        except httpx.HTTPError as exc:
+            log.warning("could not read %s: %s", entity_id, exc)
+            return None
+
     async def call(self, domain: str, service: str, data: dict[str, Any]) -> None:
         resp = await self._http().post(f"/api/services/{domain}/{service}", json=data)
         resp.raise_for_status()
+        # We just changed something, so the cached states are now wrong. Expire
+        # them rather than serving a snapshot that contradicts what we just did.
+        self._fetched = 0.0
 
 
 _ha: HomeAssistant | None = None
@@ -291,7 +310,10 @@ async def device_state(ctx: Context, name: str) -> ToolResult:
     if entity is None:
         return ToolResult.fail(f"I couldn't find a device called {name}.")
 
-    state = entity["state"]
+    # Read through to Home Assistant: the cached entity list is up to
+    # ENTITY_TTL seconds old, and answering "is it on?" from a stale snapshot
+    # is worse than being slightly slower.
+    state = await ha.state(entity["entity_id"]) or entity["state"]
     if entity["domain"] == "climate":
         target = entity["attributes"].get("temperature")
         current = entity["attributes"].get("current_temperature")
