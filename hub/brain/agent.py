@@ -4,8 +4,9 @@ Tier 2: the LLM tool-calling loop against a local Ollama server.
 This is the slow, capable path. Tier 1 (router.py) handles the common commands
 without ever coming here. Design notes that matter for a 14B local model:
 
-- Thinking mode is disabled. Qwen3 will happily spend 2000 tokens reasoning
-  about turning a light on, which is unacceptable for voice.
+- Thinking mode is left ON, at low effort. Turning it off is the trap: see
+  the long comment in _chat. Ollama keeps reasoning in a separate `thinking`
+  field that this code never reads, so it never reaches the speaker.
 - Temperature is low and the tool catalogue is small. Reliability of tool
   selection beats eloquence.
 - max_tool_rounds is a hard stop: a confused small model will otherwise call
@@ -91,12 +92,24 @@ class Agent:
             "messages": messages,
             "stream": False,
             "keep_alive": self.cfg.get("keep_alive", "60m"),
-            "think": False,  # Qwen3 reasoning mode: far too slow for voice
             "options": {
                 "temperature": self.cfg.get("temperature", 0.3),
                 "num_ctx": self.cfg.get("num_ctx", 8192),
             },
         }
+
+        # Do NOT send think=False. It reads like the right thing for voice and
+        # is the opposite: measured on qwen3:4b with an identical prompt,
+        #   think omitted  -> 11s, content 37 chars, reasoning in `thinking`
+        #   think=False    -> 55s, content 962 chars of "Hmm, the user is
+        #                     asking..." and `thinking` empty
+        # Disabling the reasoning *channel* does not stop a reasoning model
+        # reasoning -- it just relocates it into content, which we then speak
+        # aloud. Leaving it on keeps reasoning quarantined in `thinking`, which
+        # this code never reads. "low" trims the budget where supported.
+        if effort := self.cfg.get("think"):
+            payload["think"] = effort
+
         if tools:
             payload["tools"] = tools
         started = time.perf_counter()
@@ -132,6 +145,13 @@ class Agent:
             calls = message.get("tool_calls") or []
             if not calls:
                 speech = (message.get("content") or "").strip()
+                if thinking := (message.get("thinking") or "").strip():
+                    log.debug("discarded %d chars of reasoning", len(thinking))
+                if not speech and thinking:
+                    # Reasoned but never answered. Speaking the reasoning would
+                    # be worse than admitting it; say so and move on.
+                    log.warning("model produced only reasoning, no answer")
+                    return AgentReply("I got lost thinking about that.", tools_used=used)
                 return AgentReply(speech or "Sorry, I didn't catch that.", tools_used=used)
 
             messages.append(message)

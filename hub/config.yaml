@@ -27,6 +27,11 @@ llm:
   temperature: 0.3          # low: we want reliable tool calls, not creativity
   num_ctx: 8192
   max_tool_rounds: 5        # hard stop so a confused model can't loop forever
+  # Reasoning effort for thinking models: "low" | "medium" | "high", or
+  # blank to leave it to the model. NEVER set this to false -- see the
+  # comment in brain/agent.py; it relocates the reasoning into the spoken
+  # reply and runs 5x slower.
+  think: "low"
   keep_alive: "60m"         # keep weights resident; first-token latency matters more than VRAM here
 
 tts:
