@@ -228,28 +228,48 @@ class AndroidClient:
 
     async def _record(self, path: Path, seconds: int) -> bytes:
         """Record via termux-microphone-record, then transcode to the 16kHz
-        mono PCM the hub expects."""
-        wav = path.with_suffix(".wav")
+        mono PCM the hub expects.
+
+        The container is m4a/AAC because that is what the recorder actually
+        supports -- its -e encoder takes aac, amr_wb, amr_nb or opus, and
+        passing "wav" fails. It does not matter: ffmpeg transcodes to raw PCM
+        either way, so the intermediate format is irrelevant.
+        """
+        clip = path.with_suffix(".m4a")
         raw = path.with_suffix(".pcm")
-        for f in (wav, raw):
+        for f in (clip, raw):
             f.unlink(missing_ok=True)
 
         await asyncio.to_thread(
             termux,
-            ["termux-microphone-record", "-f", str(wav), "-l", str(seconds),
-             "-r", "16000", "-c", "1", "-e", "wav"],
+            ["termux-microphone-record", "-f", str(clip), "-l", str(seconds),
+             "-r", "16000", "-c", "1"],
             seconds + 10,
         )
         await asyncio.sleep(seconds + 0.5)
-        await asyncio.to_thread(termux, ["termux-microphone-record", "-q"], 10)
+        # -l already stopped it, so -q usually reports "no recording in
+        # progress". Harmless, and not a reason to fail the whole turn.
+        try:
+            await asyncio.to_thread(termux, ["termux-microphone-record", "-q"], 10)
+        except Refused:
+            pass
+
+        if not clip.exists() or clip.stat().st_size == 0:
+            raise Refused(
+                "The microphone recorded nothing. Grant Termux:API microphone "
+                "permission, and check no other app is holding the mic."
+            )
 
         if shutil.which("ffmpeg") is None:
             raise Refused("ffmpeg isn't installed. Run: pkg install ffmpeg")
-        subprocess.run(
-            ["ffmpeg", "-y", "-loglevel", "error", "-i", str(wav),
+        proc = subprocess.run(
+            ["ffmpeg", "-y", "-loglevel", "error", "-i", str(clip),
              "-f", "s16le", "-ar", "16000", "-ac", "1", str(raw)],
-            check=True, timeout=60,
+            capture_output=True, text=True, timeout=60,
         )
+        if proc.returncode != 0 or not raw.exists():
+            raise Refused(f"I couldn't convert the recording: "
+                          f"{(proc.stderr or '').strip()[:120]}")
         return raw.read_bytes()
 
     async def ask(self, seconds: int) -> None:

@@ -9,6 +9,7 @@ hub/db.sqlite*
 hub/secrets.yaml
 node/token
 client/token
+android/token
 models/
 infra/homeassistant/
 infra/searxng/
