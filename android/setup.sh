@@ -34,7 +34,11 @@ pkg update -y >/dev/null 2>&1 || warn "pkg update had problems; continuing"
 pkg install -y python termux-api ffmpeg >/dev/null 2>&1
 command -v python  >/dev/null && ok "python $(python -V 2>&1 | cut -d' ' -f2)" || { bad "python missing"; FAILED=1; }
 command -v ffmpeg  >/dev/null && ok "ffmpeg"  || { bad "ffmpeg missing";  FAILED=1; }
-command -v ffplay  >/dev/null && ok "ffplay"  || { bad "ffplay missing (comes with ffmpeg)"; FAILED=1; }
+# Termux's ffmpeg is built without SDL, so ffplay is simply absent here.
+# Not fatal: client.py falls back to termux-media-player.
+if command -v ffplay >/dev/null; then ok "ffplay"
+elif command -v termux-media-player >/dev/null; then ok "termux-media-player (ffplay absent, as expected on Termux)"
+else warn "no audio player yet -- termux-media-player arrives with the Termux:API app"; fi
 
 # websockets is the ONLY python dependency. Pure python, so no compiler and no
 # native wheels -- which is exactly why this client is viable on Termux.

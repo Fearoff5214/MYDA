@@ -27,6 +27,8 @@ import os
 import shutil
 import subprocess
 import sys
+import wave
+import time
 from pathlib import Path
 
 import websockets
@@ -308,13 +310,50 @@ class AndroidClient:
 
     @staticmethod
     def _play(pcm: bytes, rate: int) -> None:
-        if shutil.which("ffplay") is None:
-            log.warning("ffplay missing; cannot speak the reply")
+        """Play raw PCM through whatever this phone actually has.
+
+        Termux's ffmpeg is built without SDL, so it ships no ffplay -- the
+        obvious choice is simply absent. termux-media-player is the reliable
+        one here, and it needs a real container rather than a raw stream, so
+        we write a WAV first.
+        """
+        if shutil.which("ffplay"):
+            subprocess.run(
+                ["ffplay", "-autoexit", "-nodisp", "-loglevel", "quiet",
+                 "-f", "s16le", "-ar", str(rate), "-ac", "1", "-"],
+                input=pcm, timeout=120,
+            )
             return
-        subprocess.run(
-            ["ffplay", "-autoexit", "-nodisp", "-loglevel", "quiet",
-             "-f", "s16le", "-ar", str(rate), "-ac", "1", "-"],
-            input=pcm, timeout=120,
+
+        tmp = Path(os.environ.get("TMPDIR", "/data/data/com.termux/files/usr/tmp"))
+        tmp.mkdir(parents=True, exist_ok=True)
+        wav = tmp / "jarvis_reply.wav"
+        with wave.open(str(wav), "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(rate)
+            wf.writeframes(pcm)
+
+        seconds = len(pcm) / 2 / rate
+        for cmd in (["termux-media-player", "play", str(wav)],
+                    ["play-audio", str(wav)],
+                    ["mpv", "--no-video", "--really-quiet", str(wav)]):
+            if shutil.which(cmd[0]) is None:
+                continue
+            try:
+                subprocess.run(cmd, capture_output=True, timeout=seconds + 30)
+                # termux-media-player returns immediately and plays in the
+                # background, so wait it out or the next turn talks over it.
+                if cmd[0] == "termux-media-player":
+                    time.sleep(seconds + 0.3)
+                return
+            except (OSError, subprocess.SubprocessError) as exc:
+                log.debug("%s failed: %s", cmd[0], exc)
+
+        log.warning(
+            "nothing available to play audio. Install the Termux:API app "
+            "(termux-media-player), or 'pkg install mpv'. The reply text is "
+            "still printed above."
         )
 
     async def run_daemon(self) -> None:
