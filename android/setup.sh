@@ -116,16 +116,35 @@ timeout 15 termux-sms-list -l 1 >/dev/null 2>&1 \
 
 # ---------------------------------------------------------------------------
 say "hub address and token"
-if [ -f token ]; then
-  ok "token already present"
-else
+
+# A token pasted at a prompt is easy to get wrong: arrow keys and Home/End
+# arrive as escape sequences and `read` stores them verbatim, so the file
+# looks fine to `[ -f ]` while containing garbage. That surfaces much later
+# as a baffling auth rejection, so validate the shape instead of its
+# existence. Real tokens are token_urlsafe(32): 43 URL-safe base64 chars.
+token_looks_sane() {
+  [ -s token ] || return 1
+  local t
+  t="$(tr -d '
+' < token)"
+  case "$t" in *[!A-Za-z0-9_-]*) return 1 ;; esac
+  [ "${#t}" -ge 20 ]
+}
+
+while ! token_looks_sane; do
+  if [ -s token ]; then
+    bad "android/token does not look like a token"
+    warn "probably arrow keys captured at the prompt. Re-enter it."
+  fi
   echo "  On the hub, run:  python scripts/new_device.py phone --alias 'my phone'"
-  read -r -p "  Paste the token it printed: " TOKEN
-  [ -n "$TOKEN" ] || { bad "no token given"; exit 1; }
+  echo "  Long-press to PASTE rather than typing, and do not use arrow keys."
+  read -r -p "  Token: " TOKEN
+  TOKEN="$(printf '%s' "$TOKEN" | tr -d '[:space:]')"
+  if [ -z "$TOKEN" ]; then bad "no token given"; exit 1; fi
   printf '%s' "$TOKEN" > token
   chmod 600 token
-  ok "saved to android/token"
-fi
+done
+ok "token looks valid ($(wc -c < token | tr -d ' ') chars)"
 
 echo
 echo "  The hub must be reachable from the phone. On the same Wi-Fi its LAN"
