@@ -249,6 +249,49 @@ paths rather than a blocklist; arbitrary shell is disabled in config;
 destructive actions need spoken confirmation; every tool call is written to
 `logs/audit.jsonl`.
 
+## Choosing a model
+
+Measured, not guessed. `scripts/compare_models.py` scores models on the only
+thing that decides whether this feels good: picking the right tool with the
+right arguments. General leaderboards do not measure that.
+
+10 hard cases (the ones Tier 1 does NOT cover) x 2 runs, against the real
+34-tool catalogue, on an RTX 5060 Laptop with 8 GB VRAM:
+
+| model | tool accuracy | p50 | worst | median tokens |
+|---|---|---|---|---|
+| llama3.2:3b | 18/20 | 0.2s | 0.5s | 20 |
+| qwen2.5:3b  | 18/20 | 0.2s | 0.5s | 21 |
+| qwen3:4b    | 18/20 | 2.7s | 35.4s | 211 |
+
+**Identical accuracy; qwen3 is 13x slower at the median and 70x at the worst.**
+The whole difference is those 211 tokens. qwen3 is a reasoning model, and here
+the tool call *is* the answer, so reasoning is pure cost. Do not use a
+reasoning model for this unless you have measured that it buys you something.
+
+Two caveats worth knowing:
+
+- **Never send `think: false` to a reasoning model.** It does not stop the
+  model reasoning; it relocates the reasoning from a separate `thinking`
+  field into `content`, which then gets spoken aloud. Measured on qwen3:4b,
+  identical prompt: omitted 11s / 37-char answer, `think: false` 55s /
+  962 chars of "Hmm, the user is asking...". See `brain/agent.py`.
+- The models disagree about which case they fail, and each failure is
+  instructive rather than random: llama3.2 searches the web for "the capital
+  of Australia" instead of just answering, while the qwens miss "turn the
+  kitchen plug **off**" (reverse word order). Tier 1 already matches that
+  second phrasing, so it never reaches a model in practice.
+
+Run it yourself before committing to a model on the desktop:
+
+```powershell
+ollama pull qwen3:14b
+python scripts/compare_models.py --repeat 3
+```
+
+The desktop has more VRAM, so a 7B-14B model may well win on accuracy there
+and be worth its extra latency. That is a measurement, not an assumption.
+
 ## Windows Smart App Control blocks two of the models
 
 Worth knowing before you debug it yourself. Check the policy:

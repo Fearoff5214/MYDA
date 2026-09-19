@@ -57,6 +57,30 @@ CASES: list[tuple[str, str | None, dict]] = [
 ]
 
 
+def _arg_matches(got: object, want: object) -> bool:
+    """Compare the way the tools do, not the way Python does.
+
+    Models often return "40" where the schema says integer. Every tool here
+    coerces with int()/float() inside a try, so a quoted number works
+    perfectly at runtime -- counting it as a failure would measure JSON
+    formatting rather than whether the model understood the request.
+    """
+    if type(got) is type(want) and got == want:
+        return True
+    # bool is a subclass of int in Python, so True == 1. A model answering
+    # `true` where a number was asked for is a genuine mistake, not a
+    # formatting quirk, so neither side may be a bool here.
+    if isinstance(want, (int, float)) and not isinstance(want, bool) \
+            and not isinstance(got, bool):
+        try:
+            return float(got) == float(want)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return False
+    if isinstance(want, str) and isinstance(got, str):
+        return got.strip().lower() == want.strip().lower()
+    return False
+
+
 def build_ctx() -> types.SimpleNamespace:
     """A context where every tool is 'available', so the catalogue is full."""
     nodes = types.SimpleNamespace(
@@ -145,7 +169,8 @@ async def score(client: httpx.AsyncClient, model: str, tools: list[dict],
                     problems[-1] += f"  -- said {content[:34]!r}"
                 continue
 
-            bad = {k: (args.get(k), v) for k, v in want_args.items() if args.get(k) != v}
+            bad = {k: (args.get(k), v) for k, v in want_args.items()
+                   if not _arg_matches(args.get(k), v)}
             if bad:
                 problems.append(f"{text[:26]!r}: right tool, wrong args {bad}")
                 continue
